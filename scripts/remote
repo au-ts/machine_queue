@@ -56,14 +56,3 @@ RemoteTTYCommand() {
     fi
     RemoteTTYCommandOn "${HOST}" "$@"
 }
-
-RemoteTTYCommand() {
-    if [ "$(hostname -f)" = "${HOST}" ]; then
-	( # execute in a subshell so things like RemoteCommandTTY exit
-	  # don't terminate the shell.
-            eval "$@"
-	)
-       return $?
-    fi
-    RemoteTTYCommandOn "${HOST}" "$@"
-}
