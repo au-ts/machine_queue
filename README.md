@@ -129,3 +129,34 @@ Two other commands are more for use in scripts:
 `mq system-tsv` and `mq pool-tsv` take no arguments, and write to stdout
 all the systems, and all the pools (respectively).
 
+Server-side metadata
+--------------------
+
+By default, `mq` now tries to load machine and pool metadata from the
+server before falling back to the copies in the client checkout. This
+lets the server add or remove boards without requiring every client to
+pull a fresh repo checkout.
+
+The client looks for these tab-separated files on the server:
+
+* `${BASE}/systems.tsv`
+* `${BASE}/pools.tsv`
+
+`systems.tsv` format:
+
+```
+name	poweroff_name	arch	sel4_plat	isa	soc	cpu	cores	ram	max_clk	num_files	linux_num_files	pxe_linux	dtb
+```
+
+`poweroff_name` may be left empty to use `name`. `linux_num_files` may
+also be left empty to reuse `num_files`.
+
+`pools.tsv` format:
+
+```
+pool	system1	system2	...
+```
+
+If needed, the manifest locations can be overridden with
+`MQ_SYSTEMS_TSV` and `MQ_POOLS_TSV`.
+

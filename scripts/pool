@@ -9,41 +9,95 @@ if [ ! "${SCRIPT_PATH}" ]; then
     exit -1
 fi
 
+POOL_MANIFEST=${MQ_POOLS_TSV:-${BASE}/pools.tsv}
+LOADED_POOLS=""
+POOL_METADATA_SOURCE="local"
+TAB=$(printf '\t')
+CR=$(printf '\r')
+
+RegisterPoolMetadata() {
+    pool="$1"
+    shift
+    systems_nl=$(printf "%s\n" "$@")
+    quoted_systems=$(printf "%s" "$systems_nl" | sed "s/'/'\\''/g; 1s/^/'/; \$s/\$/'/")
+
+    eval "
+Systems_${pool}() {
+    printf '%b' ${quoted_systems}
+}
+GetRandomSystemFromPool_${pool}() {
+    locked_systems=\"\$(GetAllLockedSystems)\"
+    pool_systems=\"\$(Systems_${pool})\"
+    free_pool_systems=\"\$(printf '%s\\n' \"\${pool_systems}\" | grep -F -v -x \"\${locked_systems}\")\"
+    if [ \"\${free_pool_systems}\" ]; then
+        selectOne \"\${free_pool_systems}\"
+    else
+        selectOne \"\${pool_systems}\"
+    fi
+}
+"
+
+    LOADED_POOLS="${LOADED_POOLS}${pool}
+"
+}
+
+LoadRemotePoolMetadata() {
+    manifest_lines=$(RemoteCommand "cat '${POOL_MANIFEST}'" 2>/dev/null) || return 1
+
+    loaded=0
+    while IFS="$TAB" read -r pool system1 system2 system3 system4 system5 system6 system7 system8 system9 remainder
+    do
+        pool=${pool%"$CR"}
+        [ -n "$pool" ] || continue
+        case "$pool" in
+            '#'*|pool)
+                continue
+                ;;
+        esac
+        [ -n "$system1" ] || continue
+        set --
+        for system in "$system1" "$system2" "$system3" "$system4" "$system5" "$system6" "$system7" "$system8" "$system9"
+        do
+            [ -n "$system" ] && set -- "$@" "$system"
+        done
+        [ -z "$remainder" ] || set -- "$@" "$remainder"
+        RegisterPoolMetadata "$pool" "$@"
+        loaded=1
+    done <<EOF_MANIFEST
+$manifest_lines
+EOF_MANIFEST
+
+    [ $loaded -eq 1 ] || return 1
+    POOL_METADATA_SOURCE="remote"
+    return 0
+}
+
 IsPoolValid() {
     pool=$1
+    if [ "${POOL_METADATA_SOURCE}" = "remote" ]; then
+        printf "%b" "${LOADED_POOLS}" | grep -F -x "$pool" >/dev/null 2>&1
+        return $?
+    fi
     [ -f "${SCRIPT_PATH}/scripts/pools/${pool}" ]
 }
 
 PoolList() {
+    if [ "${POOL_METADATA_SOURCE}" = "remote" ]; then
+        printf "%b" "${LOADED_POOLS}" | sed '/^$/d'
+        return 0
+    fi
     (
-	cd "${SCRIPT_PATH}/scripts/pools/" || exit
-	echo * | sed 's/unavailable//'
+        cd "${SCRIPT_PATH}/scripts/pools/" || exit
+        echo * | sed 's/unavailable//'
     )
 }
 
-selectOne(){
-    n=`echo "$1" | wc -l`
-    r=`random $n`
-    echo "$1" | sed -n ${r}p
-}
-
-GetRandomSystemFromPool() {
-    # Get a random system from the pool, unlocked if possible
-    locked_systems="$(GetAllLockedSystems)"
-    systems="$(Systems_$1)"
-    free_systems="$(echo "$systems" | grep -F -v -x "$locked_systems")"
-    if [ "$free_systems" ]
-    then
-        selectOne "$free_systems"
-    else
-        selectOne "$systems"
-    fi
-}
-
-for pool in $(PoolList)
-do
-    . "${SCRIPT_PATH}/scripts/pools/${pool}"
-done
+if ! LoadRemotePoolMetadata; then
+    for pool in $(PoolList)
+    do
+        . "${SCRIPT_PATH}/scripts/pools/${pool}"
+    done
+fi
 
 OutputPoolList() {
     printf "+----------------------+---------------------------------------------------------------+\n"

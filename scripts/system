@@ -9,8 +9,133 @@ if [ "${SCRIPT_PATH}" = "" ]; then
     exit -1
 fi
 
+SYSTEM_MANIFEST=${MQ_SYSTEMS_TSV:-${BASE}/systems.tsv}
+LOADED_SYSTEMS=""
+SYSTEM_METADATA_SOURCE="local"
+TAB=$(printf '\t')
+CR=$(printf '\r')
+
+ShellSingleQuote() {
+    printf "%s" "$1" | sed "s/'/'\\''/g; 1s/^/'/; \$s/\$/'/"
+}
+
+RegisterSystemMetadata() {
+    system="$1"
+    poweroff_name="$2"
+    arch="$3"
+    sel4_plat="$4"
+    isa="$5"
+    soc="$6"
+    cpu="$7"
+    cores="$8"
+    ram="$9"
+    shift 9
+    max_clk="$1"
+    num_files="$2"
+    linux_num_files="$3"
+    pxe_linux="$4"
+    dtb="$5"
+
+    [ -n "$linux_num_files" ] || linux_num_files="$num_files"
+    [ -n "$poweroff_name" ] || poweroff_name="$system"
+
+    quoted_system=$(ShellSingleQuote "$system")
+    quoted_poweroff=$(ShellSingleQuote "$poweroff_name")
+    quoted_arch=$(ShellSingleQuote "$arch")
+    quoted_sel4_plat=$(ShellSingleQuote "$sel4_plat")
+    quoted_isa=$(ShellSingleQuote "$isa")
+    quoted_soc=$(ShellSingleQuote "$soc")
+    quoted_cpu=$(ShellSingleQuote "$cpu")
+    quoted_cores=$(ShellSingleQuote "$cores")
+    quoted_ram=$(ShellSingleQuote "$ram")
+    quoted_max_clk=$(ShellSingleQuote "$max_clk")
+    quoted_num_files=$(ShellSingleQuote "$num_files")
+    quoted_linux_num_files=$(ShellSingleQuote "$linux_num_files")
+    quoted_pxe_linux=$(ShellSingleQuote "$pxe_linux")
+    quoted_dtb=$(ShellSingleQuote "$dtb")
+
+    eval "
+SystemName_${system}() {
+    printf '%s\\n' ${quoted_system}
+}
+SystemPowerOff_${system}() {
+    RebootShutdown ${quoted_poweroff}
+}
+Arch_${system}() {
+    printf '%s\\n' ${quoted_arch}
+}
+Sel4Plat_${system}() {
+    printf '%s\\n' ${quoted_sel4_plat}
+}
+ISA_${system}() {
+    printf '%s\\n' ${quoted_isa}
+}
+SOC_${system}() {
+    printf '%s\\n' ${quoted_soc}
+}
+CPU_${system}() {
+    printf '%s\\n' ${quoted_cpu}
+}
+Cores_${system}() {
+    printf '%s\\n' ${quoted_cores}
+}
+RAM_${system}() {
+    printf '%s\\n' ${quoted_ram}
+}
+MaxCLK_${system}() {
+    printf '%s\\n' ${quoted_max_clk}
+}
+PXELinux_${system}() {
+    printf '%s\\n' ${quoted_pxe_linux}
+}
+DTB_${system}() {
+    printf '%s\\n' ${quoted_dtb}
+}
+SystemNumFiles_${system}() {
+    if [ \"\$1\" = '-L' ]; then
+        printf '%s\\n' ${quoted_linux_num_files}
+    else
+        printf '%s\\n' ${quoted_num_files}
+    fi
+}
+"
+
+    LOADED_SYSTEMS="${LOADED_SYSTEMS}${system}
+"
+}
+
+LoadRemoteSystemMetadata() {
+    manifest_lines=$(RemoteCommand "cat '${SYSTEM_MANIFEST}'" 2>/dev/null) || return 1
+
+    loaded=0
+    while IFS="$TAB" read -r name poweroff_name arch sel4_plat isa soc cpu cores ram max_clk num_files linux_num_files pxe_linux dtb extra
+    do
+        name=${name%"$CR"}
+        [ -n "$name" ] || continue
+        case "$name" in
+            '#'*|name)
+                continue
+                ;;
+        esac
+        [ -z "$extra" ] || continue
+        [ -n "$dtb" ] || continue
+        RegisterSystemMetadata "$name" "$poweroff_name" "$arch" "$sel4_plat" "$isa" "$soc" "$cpu" "$cores" "$ram" "$max_clk" "$num_files" "$linux_num_files" "$pxe_linux" "$dtb"
+        loaded=1
+    done <<EOF_MANIFEST
+$manifest_lines
+EOF_MANIFEST
+
+    [ $loaded -eq 1 ] || return 1
+    SYSTEM_METADATA_SOURCE="remote"
+    return 0
+}
+
 IsSystemValid() {
     system="$1"
+    if [ "${SYSTEM_METADATA_SOURCE}" = "remote" ]; then
+        printf "%b" "${LOADED_SYSTEMS}" | grep -F -x "$system" >/dev/null 2>&1
+        return $?
+    fi
     [ -f "${SCRIPT_PATH}/scripts/systems/${system}" ]
 }
 
@@ -25,30 +150,36 @@ SystemBootsLinuxPXE() {
 }
 
 SystemList() {
+    if [ "${SYSTEM_METADATA_SOURCE}" = "remote" ]; then
+        printf "%b" "${LOADED_SYSTEMS}" | sed '/^$/d'
+        return 0
+    fi
     (
-	cd "${SCRIPT_PATH}/scripts/systems/"
-	echo * | sed -e 's/ unavailable//' -e 's/ [^ ]*~//g' -e 's/  */\n/g'
+        cd "${SCRIPT_PATH}/scripts/systems/" || exit
+        echo * | sed -e 's/ unavailable//' -e 's/ [^ ]*~//g' -e 's/  */\n/g'
     )
 }
 
-for system in $(SystemList)
-do
-    . "${SCRIPT_PATH}/scripts/systems/${system}"
-done
+if ! LoadRemoteSystemMetadata; then
+    for system in $(SystemList)
+    do
+        . "${SCRIPT_PATH}/scripts/systems/${system}"
+    done
+fi
 
 OutputSystemList() {
     system=""
 
     case "$1" in
-	help)
-	    printf >&2 "systems [help|simple]"
-	    printf >&2 "Print list of available systems.  With 'simple' just give their names"
-	    return 0
-	    ;;
-	simple)
-	    SystemList
-	    return 0
-	    ;;
+        help)
+            printf >&2 "systems [help|simple]"
+            printf >&2 "Print list of available systems.  With 'simple' just give their names"
+            return 0
+            ;;
+        simple)
+            SystemList
+            return 0
+            ;;
     esac
     printf "+----------------+------+---------+-----------------+----------------+-------+-------+--------+\n"
     printf "| Name           | Arch | ISA     | SoC             | CPU            | Cores | RAM   | MaxCLK |\n"
@@ -56,13 +187,13 @@ OutputSystemList() {
     for system in $(SystemList)
     do
         printf "| %14s " "${system}"
-        printf "| %5s "  "$("Arch_${system}")"
-        printf "| %7s "  "$("ISA_${system}")"
+        printf "| %5s " "$("Arch_${system}")"
+        printf "| %7s " "$("ISA_${system}")"
         printf "| %15s " "$("SOC_${system}")"
         printf "| %14s " "$("CPU_${system}")"
-        printf "| %5s "  "$("Cores_${system}")"
-        printf "| %5s "  "$("RAM_${system}")"
-        printf "| %6s "  "$("MaxCLK_${system}")"
+        printf "| %5s " "$("Cores_${system}")"
+        printf "| %5s " "$("RAM_${system}")"
+        printf "| %6s " "$("MaxCLK_${system}")"
         printf "|\n"
     done
     printf "+----------------+------+---------+-----------------+----------------+-------+-------+--------+\n"
@@ -87,25 +218,24 @@ OutputSystemTSV() {
     printf "name\tarch\tsel4_plat\tisa\tsoc\tcpu\tcores\tram\tmax_clk\tnum_files\n"
     for system in $(SystemList)
     do
-		printf \
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-        	"${system}" \
-        	"$("Arch_${system}")" \
-        	"$("Sel4Plat_${system}")" \
-        	"$("ISA_${system}")" \
-        	"$("SOC_${system}")" \
-        	"$("CPU_${system}")" \
-        	"$("Cores_${system}")" \
-        	"$("RAM_${system}")" \
-        	"$("MaxCLK_${system}")" \
-			"$("SystemNumFiles_${system}")"
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+            "${system}" \
+            "$("Arch_${system}")" \
+            "$("Sel4Plat_${system}")" \
+            "$("ISA_${system}")" \
+            "$("SOC_${system}")" \
+            "$("CPU_${system}")" \
+            "$("Cores_${system}")" \
+            "$("RAM_${system}")" \
+            "$("MaxCLK_${system}")" \
+            "$("SystemNumFiles_${system}")"
     done
 }
 
 SystemCorrectNumberOfFiles() {
     [ "$1" = "-L" ] && {
-	linux="-L"
-	shift
+        linux="-L"
+        shift
     }
     system=$1
     num=$2
@@ -129,19 +259,19 @@ SystemRunImage() {
     kernel="$7"
     rootserver=""
 
-    [ $kernel = "-L" ] && {
-	linux="-L"
-	shift
-	kernel="$7"
+    [ "$kernel" = "-L" ] && {
+        linux="-L"
+        shift
+        kernel="$7"
     }
 
-    [ $kernel = "-b" ] && {
+    [ "$kernel" = "-b" ] && {
         dtbflag="$7 $8"
         shift 2
         kernel="$7"
     }
 
-    [ $kernel = "--bitstream" ] && {
+    [ "$kernel" = "--bitstream" ] && {
         bitstreamflag="$7 $8"
         shift 2
         kernel="$7"
