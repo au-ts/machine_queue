@@ -19,7 +19,7 @@ tftp
 RebootShutdown() {
     machine=$1
     if ! HaveRebootAndConsole; then
-        ssh -tt -oLogLevel=quiet ${HOST} "stty isig -echoctl -echo; /tftpboot/${machine}/reboot --shutdown"
+        RemoteTTYCommandOn ${HOST} "/tftpboot/${machine}/reboot --shutdown"
     else
         "/tftpboot/${machine}/reboot" --shutdown
     fi
@@ -87,7 +87,7 @@ RebootConsoleRunTwoFiles() {
             fi
         fi
 
-        ssh -tt -oLogLevel=quiet ${HOST} "stty isig -echoctl -echo; /tftpboot/${machine}/reboot $linux $dtbflag $bitstreamflag -l '${logfile}' -c '${completion}' -t '${completion_timeout}' -e '${errortxt}' -k '${kernelfile}' -u '${rootserverfile}' ${ka_flag}"
+        RemoteTTYCommandOn ${HOST} "/tftpboot/${machine}/reboot $linux $dtbflag $bitstreamflag -l '${logfile}' -c '${completion}' -t '${completion_timeout}' -e '${errortxt}' -k '${kernelfile}' -u '${rootserverfile}' ${ka_flag}"
         ret=$?
         if [ "${output}" != "" ]; then
             scp "${HOST}:${logfile}" "${output}"
@@ -165,7 +165,7 @@ RebootConsoleRunOneFile() {
             fi
         fi
 
-        ssh -tt -oLogLevel=quiet ${HOST} "stty isig -echoctl -echo; /tftpboot/${machine}/reboot $linux $dtbflag $bitstreamflag -l '${logfile}' -c '${completion}' -t '${completion_timeout}' -e '${errortxt}' -k '${kernelfile}' ${ka_flag}"
+        RemoteTTYCommandOn ${HOST} "/tftpboot/${machine}/reboot $linux $dtbflag $bitstreamflag -l '${logfile}' -c '${completion}' -t '${completion_timeout}' -e '${errortxt}' -k '${kernelfile}' ${ka_flag}"
         ret=$?
         if [ "${output}" != "" ]; then
             scp "${HOST}:${logfile}" "${output}"
