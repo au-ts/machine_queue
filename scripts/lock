@@ -17,16 +17,22 @@ KeyName() {
     echo "${BASE}/$1.key"
 }
 
+LockHelperCommand() {
+    cmd="$1"
+    shift
+    RemoteCommand "'${BASE}/scripts/lock_helper' '${BASE}' '${cmd}' $*"
+}
+
 LockOwner() {
-    RemoteCommand "/bin/sh -c 'stat --format=\"%U\" $(LockName \"$1\") 2>/dev/null'"
+    LockHelperCommand owner "'$(printf "%s" "$1" | sed "s/'/'\\''/g")'"
 }
 
 LockGetInfo() {
-    RemoteCommand "/bin/sh -c 'stat --format=\"%U,%y\" $(LockName \"$1\") 2>/dev/null'"
+    LockHelperCommand info "'$(printf "%s" "$1" | sed "s/'/'\\''/g")'"
 }
 
 LockGetKey() {
-    RemoteCommand cat "$(KeyName \"$1\") 2>/dev/null"
+    LockHelperCommand key "'$(printf "%s" "$1" | sed "s/'/'\\''/g")'"
 }
 
 LockIOwn() {
@@ -35,31 +41,34 @@ LockIOwn() {
 }
 
 LockTimeout() {
-    RemoteCommand "cat $(LockName \"$1\")"
+    LockHelperCommand timeout "'$(printf "%s" "$1" | sed "s/'/'\\''/g")'"
 }
 
 GetAllLockedSystems() {
-    RemoteCommand find ${BASE} -name '*.lock' -print0 |
-	xargs -0 -I {} basename {} .lock |
+    LockHelperCommand list-locked |
 	grep -F "`SystemList`"
     echo
+}
+
+LockReadState() {
+    LockHelperCommand state "'$(printf "%s" "$1" | sed "s/'/'\\''/g")'"
 }
 
 LockSystemPrintInfo() {
     system="$1"
 
-    info="$(LockGetInfo "$system")"
-    owner=$(echo "$info" | cut -d ',' -f 1)
-    since=$(echo "$info" | cut -d ',' -f 2)
-    lockkey=$(LockGetKey "${system}")
+    state="$(LockReadState "$system")"
+    owner=$(printf '%s' "$state" | cut -f 1)
+    since=$(printf '%s' "$state" | cut -f 2)
+    timeout=$(printf '%s' "$state" | cut -f 3)
+    lockkey=$(printf '%s' "$state" | cut -f 4)
 
     if [ ! "${owner}" ]; then
         echo "Lock for $system currently free"
-        return;
+        return
     fi
-    timeout=$(LockTimeout "$system")
     printf "Lock for $system held by $owner since $since, timeout $timeout"
-    if [ "${lockkey}" != "0" ]; then
+    if [ "${lockkey}" != "0" ] && [ -n "${lockkey}" ]; then
         echo " with key '${lockkey}'"
     else
         echo ""
@@ -69,10 +78,10 @@ LockSystemPrintInfo() {
 # This prints the status of the lock in a more machine-readable format
 LockSystemDumpInfo() {
     system="$1"
-    info=$(LockGetInfo "$1")
-    owner=$(echo "$info" | cut -d ',' -f 1)
-    since=$(echo "$info" | cut -d ',' -f 2)
-    lockkey=$(LockGetKey "${system}")
+    state=$(LockReadState "$1")
+    owner=$(printf '%s' "$state" | cut -f 1)
+    since=$(printf '%s' "$state" | cut -f 2)
+    lockkey=$(printf '%s' "$state" | cut -f 4)
     printf "$system"
     if [ "${owner}" = "" ];
     then
@@ -81,7 +90,7 @@ LockSystemDumpInfo() {
     printf " LOCKED"
     printf " $owner"
     printf " $since"
-        if [ "${lockkey}" != "0" ];
+        if [ "${lockkey}" != "0" ] && [ -n "${lockkey}" ];
     then
             printf " ${lockkey}"
     fi
@@ -102,48 +111,30 @@ LockSystem() {
     total_retries="$3"
     key="$4"
     newtimeout="$5"
-    timeout=""
-    owner=$(LockOwner "${system}")
 
-    # Error checking - the same person can't relock the same lock
-    #                - if they are trying to, check if they are using a different key
-    if [ "${owner}" = "${REMOTEUSER}" ]
-    then
-        lockkey=$(LockGetKey "${system}")
-        if [ "${lockkey}" = "0" -a  "${key}" = "0" ]
-        then
-            echo "Attempting to grab lock you already own. Please explicitly release"
+    LockHelperCommand acquire \
+        "'$(printf "%s" "$system" | sed "s/'/'\\''/g")'" \
+        "'$(printf "%s" "$REMOTEUSER" | sed "s/'/'\\''/g")'" \
+        "'${retry_period}'" \
+        "'${total_retries}'" \
+        "'$(printf "%s" "$key" | sed "s/'/'\\''/g")'" \
+        "'${newtimeout}'"
+    rc=$?
+
+    case "$rc" in
+        0)
+            return 0
+            ;;
+        11)
             return 1
-        fi
-        if [ "${lockkey}" = "${key}" ]
-        then
-            echo "Attempting to grab lock you already own with the same key. Please explicitly release"
+            ;;
+        12)
             return 2
-        fi
-    fi
-    if [ "${owner}" ] # race here!
-    then
-        # Ensure timeout is either an integer or ignored
-        # to avoid lockfile syntax errors
-        timeout="$(LockTimeout $system)" || timeout=""
-        case $timeout in
-            ''|*[!0-9]*)
-                # no valid timeout
-                timeout=""
-                ;;
-            *)
-                # valid timeout
-                timeout="-l ${timeout}"
-                ;;
-        esac
-    fi
-    lockname="$(LockName ${system})"
-    keyname="$(KeyName ${system})"
-    RemoteCommand "umask 0111 && lockfile -'${retry_period}'  $timeout -r '${total_retries}' '$lockname' && rm -f '$keyname' && printf '${key}' > '$keyname' && chmod a-w,g+r '$keyname' && chmod u+w $lockname && printf '$newtimeout' > $lockname && chmod a-w $lockname"
-
-    [ "$?" -ne  0 ] && return 3
-
-    return 0
+            ;;
+        *)
+            return 3
+            ;;
+    esac
 }
 
 UnlockSystem() {
@@ -151,19 +142,11 @@ UnlockSystem() {
     force="$2"
     key="$3"
 
-    if [ "${force}" -ne 1 ]; then
-        owner=$(LockOwner "${system}")
-        if [ "${owner}" != "${REMOTEUSER}" ]; then
-            echo "Attempting to unlock system ${system} that you do not hold"
-            return;
-        fi
-        lockkey=$(LockGetKey "${system}")
-        if [ "${lockkey}" != "${key}" ]; then
-            echo "Attempting to unlock system ${system} with the wrong key!"
-            return;
-        fi
-    fi
-    RemoteCommand "rm -f '$(KeyName "${system}")'; sync; rm -f '$(LockName "${system}")'"
+    LockHelperCommand release \
+        "'$(printf "%s" "$system" | sed "s/'/'\\''/g")'" \
+        "'$(printf "%s" "$REMOTEUSER" | sed "s/'/'\\''/g")'" \
+        "'${force}'" \
+        "'$(printf "%s" "$key" | sed "s/'/'\\''/g")'"
 }
 
 # Kills (TERM) processes on the server that are waiting for specified lock and key.
@@ -174,7 +157,10 @@ CancelWait() {
     system="$1"
     key="$2"
 
-    RemoteCommand "pkill -u ${REMOTEUSER} -f \"lockfile.*'${key}' > '$(KeyName "${system}")'\""
+    LockHelperCommand cancel-wait \
+        "'$(printf "%s" "$system" | sed "s/'/'\\''/g")'" \
+        "'$(printf "%s" "$REMOTEUSER" | sed "s/'/'\\''/g")'" \
+        "'$(printf "%s" "$key" | sed "s/'/'\\''/g")'"
 }
 
 UserLockUsage() {
@@ -258,76 +244,37 @@ UserLock() {
             dumpall)
 		LockSystemDumpAll
 		exit $?
-            ;;
-            help)
-                UserLockUsage
-                exit 1
-            ;;
-            --)
-                break
-            ;;
+		;;
             *)
                 echo "Unknown option $1"
                 UserLockUsage
                 exit 1
             ;;
         esac
-	shift
+        shift
     done
 
-    # Check that timeout is a positive integer
-    # If an empty string ends up in the lockfile, it can block
-    # further interaction
-
-    case $timeout in
-        ''|*[!0-9]*)
-            echo "-T <timeout> requires a positive integer"
-            exit 1
-            ;;
-        *);;
-    esac
-
-    IsSystemValid "${system}"
-    if [ $? -ne 0 ]; then
-        # If it's not a system, is it a pool?
-        IsPoolValid "${system}"
-        if [ $? -ne 0 ] ; then
-            echo "System or pool '$system' does not exist. Valid systems are"
-            SystemList
-            echo "Valid pools are"
-            PoolList
-            exit 1
-    fi
-        # Select a system from the pool
-        pool=${system}
-        system=$(GetRandomSystemFromPool "${pool}")
-        echo "${system}"
-    fi
-
-    case "${action}" in
+    case "$action" in
         -info)
-            LockSystemPrintInfo "${system}"
-        ;;
+            LockSystemPrintInfo "$system"
+            ;;
         -mr-info)
-            LockSystemDumpInfo "${system}"
-        ;;
+            LockSystemDumpInfo "$system"
+            ;;
         -signal)
-            UnlockSystem "${system}" "${force}" "${key}"
-        ;;
+            UnlockSystem "$system" "$force" "$key"
+            ;;
         -wait)
-            if ! LockSystem "${system}" "${retry_period}" "${total_retries}" "${key}" $timeout; then
-                echo "Failed to acquire lock for system (${system})"
-                exit 2
-            fi
-        ;;
+            LockSystem "$system" "$retry_period" "$total_retries" "$key" "$timeout"
+            ;;
         -cancel)
-            CancelWait "${system}" "${key}"
-        ;;
+            CancelWait "$system" "$key"
+            ;;
         *)
-            echo "Unknown usage"
             UserLockUsage
             exit 1
-        ;;
+            ;;
     esac
-    exit 0
+
+    exit $?
 }
