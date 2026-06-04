@@ -18,9 +18,9 @@ RemoteCommandOnInternal() {
     cmd="$*"
 
     if [ "${tty_mode}" = "tty" ]; then
-        ssh -tt ${SSH_COMMON_OPTS} "${host}" "stty isig -onlcr -echoctl -echo ; ${cmd}"
+        ssh -o Compression=no -tt ${SSH_COMMON_OPTS} "${host}" "stty isig -onlcr -echoctl -echo ; ${cmd}"
     else
-        ssh -T ${SSH_COMMON_OPTS} "${host}" "${cmd}"
+        ssh -o Compression=no -T ${SSH_COMMON_OPTS} "${host}" "${cmd}"
     fi
     return $?
 }
