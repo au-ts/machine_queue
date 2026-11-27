@@ -229,10 +229,18 @@ Enqueue() {
         # replace
         trap "machine-locks-client sem release "$REMOTEUSER" "$system"; exit 1" ${SIGNALS}
 
+        if [ $completion_timeout -eq  -1]; then
+            timeout_opt="--no-timeout"
+        else
+            # Have a grace period of 60 seconds between completion timeout and the lock being released
+            # to allow machine to reboot
+            timeout_opt="--timeout $((completion_timeout + 60))"
+        fi
+
         if ! machine-locks-client sem acquire \
             "$REMOTEUSER" \
             ${total_retries:+--num-retries $total_retries} \
-            ${timeout:+--timeout $timeout} \
+            ${timeout_opt} \
             ${key:+--job-name "$key"} \
             "$system"; then
             echo "Failed to acquire lock for system (${system})"
