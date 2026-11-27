@@ -227,10 +227,10 @@ Enqueue() {
         # We can setup the trap early as we check if we actually own the
         # the lock before releasing it
         # replace
-        trap "machine-locks-client sem release --owner "$REMOTEUSER" "$system"; exit 1" ${SIGNALS}
+        trap "machine-locks-client sem release "$REMOTEUSER" "$system"; exit 1" ${SIGNALS}
 
         if ! machine-locks-client sem acquire \
-            --owner "$REMOTEUSER" \
+            "$REMOTEUSER" \
             ${total_retries:+--num-retries $total_retries} \
             ${timeout:+--timeout $timeout} \
             ${key:+--job-name "$key"} \
@@ -262,7 +262,7 @@ Enqueue() {
     fi
 
     if ! ${no_lock_mods} ; then
-        machine-locks-client sem release --owner "$REMOTEUSER" "$system"
+        machine-locks-client sem release "$REMOTEUSER" "$system"
         trap "exit 1" ${SIGNALS}
     fi
 
