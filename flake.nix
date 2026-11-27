@@ -32,7 +32,7 @@
             runHook preInstall
 
             mkdir -p $out/bin
-            cp -r mq.sh scripts $out/bin/
+            cp -r mq.sh scripts VERSION $out/bin/
 
             wrapProgram $out/bin/mq.sh \
               --prefix PATH : ${pkgs.lib.makeBinPath (deps system pkgs)}
