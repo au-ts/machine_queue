@@ -60,7 +60,7 @@ Enqueue() {
     files=""
     system=""
     linux=""
-    key="0"
+    key=""
     while [ "$#" -ne 0 ]; do
         case "$1" in
             -L)
