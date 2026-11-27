@@ -32,6 +32,11 @@ For example, you can do:
   ln -s $H mq
   ```
 
+The mq scripts are dependent on the [`jq`](https://jqlang.org/download/) and
+[`machine-locks-client`](https://github.com/au-ts/machine-locks/tree/main/machine_locks_client).
+Follow the instructions at each of those links to download or compile them, and
+add them to your `$PATH`.
+
 The mq scripts assume a standard POSIX system, that `/bin/sh` is
 POSIX compliant, and that you can use `ssh` to reach
 `tftp.keg.cse.unsw.edu.au` without password.  To set up the latter,
@@ -49,6 +54,16 @@ or clauses with similar effect.  The script makes many `ssh`
 connections in a row; without the control multiplexing this can get
 painfully slow.
 
+Usage with Nix
+================
+
+You will need to enable the Nix 'flakes' feature. Then spawn a shell with:
+```
+nix shell github:seL4/machine_queue
+```
+Then, all `mq` dependencies will be accessible to `mq` automatically, and `mq.sh`
+will be in your `$PATH`. You do not need to clone the repo or set up any symlinks.
+You will still need to setup an appropriate SSH config.
 
 Usage
 ======
@@ -97,29 +112,12 @@ Options:
 - `-t` _RETRIES_  Number of retries to perform for acquiring the lock (default -1)
 - `--bitstream` _FILE_ Optional bitstream file to load to the FPGA.
 
+`mq sem dumpall|info|acquire|release|help [`_options_`]`
 
-`mq sem dumpall|-signal|-wait|-cancel|-info `_<system>_` [-f] [-w `_retry-time_` ] [-t `_retry-count_` ] [-k `_LOCK_\__KEY_` ] [-T` _timeout_`]`
-
-   Manually manipulate locks for machines. The lock for each system
-   can be acquired or released.
-
-   You can forcibly release a lock for a system that you do not
-   currently own by using the `-f` flag
-
- Options:
-
-- `-info` _SYSTEM_     Display lock information for the specified SYSTEM
-- `-mr-info` _SYSTEM_  Display lock information for the specified SYSTEM in machine-readable format
-- `-signal` _SYSTEM_   Release the lock for the specified SYSTEM
-- `-wait` _SYSTEM_     Acquire the lock for the specified SYSTEM
-- `-cancel` _SYSTEM_   Cancel `-wait` processes on the server that are waiting for specified SYSTEM and key
-- `-w` _TIME_          Number of seconds to wait between each attempt to acquire the lock (default 8)
-- `-t` _RETRIES_       Number of retries to perform for acquiring the
- lock (default -1, which means infinity)
-- `-f`               Forcefully releases a lock even if you are not the owner
-- `-k` _LOCK\_KEY_      Set a key inside the lock
-- `-T` _timeout_       Allow lock to be reclaimed after _timeout_ seconds
-- `dumpall`            Prints all currently locked systems
+Manually manipulate locks for machines. The lock for each system can be acquired
+or released. This is a pass-through to `machine-locks-client sem ...`, read its
+documentation
+[here](https://github.com/au-ts/machine-locks/tree/main/machine_locks_client).
 
 `mq systems [help|simple]`
 
